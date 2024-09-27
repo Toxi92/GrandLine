@@ -1,0 +1,226 @@
+import mysql.connector
+from dotenv import load_dotenv
+import os
+import datetime
+from hashlib import sha256
+import requests
+import time
+from flask import Flask,render_template,redirect,jsonify
+from random import randint
+application = Flask(__name__)
+env = ".env"
+load_dotenv(env)
+
+
+config = {
+    'host': os.getenv("DATABASE_HOST"),
+    'user': os.getenv("DATABASE_USERNAME"),
+    'passwd': os.getenv("DATABASE_PASSWORD"),
+    'db': os.getenv("DATABASE"),
+
+}
+
+def clearConsole():
+    command = "clear"
+    if os.name in ("nt", "dos"):  
+        command = "cls"
+    os.system(command)
+class Query:
+    query_message = """INSERT INTO `grandlinedb`.`chat` (ID, time,  expediteur, message) VALUES (0, %s, %s, %s)"""
+    query_signup="""INSERT INTO `grandlinedb`.`user` (name, password, IP) VALUES (%s, %s, %s)"""
+    query_login = """SELECT * FROM user WHERE name = %s AND passwd = %s"""
+    query_accountslist="SELECT name FROM user"
+    
+    def send_query(query, val):
+        conection = mysql.connector.connect(**config)
+        cursor = conection.cursor()
+        cursor.execute(query, val)
+        conection.commit()
+    query_login = """SELECT * FROM `grandlinedb`.`user` WHERE name = %s AND password = %s"""
+    query_friend_list = """SELECT u.name, f.ID
+                        FROM friends f
+                        JOIN user u ON f.mem_2 = u.id
+                        WHERE f.mem_1 = %s AND f.valid = 1
+                        UNION
+                        SELECT u.name, f.ID
+                        FROM friends f
+                        JOIN user u ON f.mem_1 = u.id
+                        WHERE f.mem_2 = %s AND f.valid = 1;"""
+    query_friend_add ="""INSERT INTO `grandlinedb`.`friends` (mem_1, mem_2)
+                        SELECT %s, id FROM `grandlinedb`.`user` WHERE name = %s;"""
+    query_friend_request = """SELECT user.name, friends.ID
+                        FROM friends
+                        JOIN user ON friends.mem_2 = user.id and friends.valid = 0
+                        WHERE friends.mem_1 = %s
+                        UNION SELECT user.name, friends.ID
+                        FROM friends
+                        JOIN user ON friends.mem_1 = user.id and friends.valid = 0
+                        WHERE friends.mem_2 = %s;"""
+    query_accept_friend_requests ="""UPDATE `grandlinedb`.`friends` SET `valid`=1 WHERE  `ID`=%s;"""
+    query_display_chat = """SELECT ID, time, message, expediteur FROM `grandlinedb`.`chat` WHERE ID = %s ORDER BY time ASC;"""
+    query_send_message = """INSERT INTO `grandlinedb`.`chat` (ID, time,  expediteur, message) VALUES (%s, %s, %s, %s)"""
+    query_get_friend_name = """SELECT name FROM `grandlinedb`.`user` WHERE ID = %s ;"""
+    query_island_size = """SELECT COUNT(mess_id) FROM chat WHERE ID = %s;"""
+    def __init__(self):
+        self.conn = mysql.connector.connect(**config)
+        self.cursor = self.conn.cursor(buffered=True)
+        
+    def send_query(self, query, val):
+        
+        self.cursor.execute(query, val)
+        self.conn.commit()
+
+class User:
+    def __init__(self,passwd=None ,id=None,ip=None, name=None):#J'ai mis passwd à none car initialisé dans signup
+        self.id=id
+        self.name = name        
+        self.passwd = passwd    
+        self.ip = ip
+        self.demande= {}
+        self.chat = {}
+        self.auth = False
+        self.actual_chat = 0
+        self.User_Islands= []
+
+    def password(self):
+        special_characters = "!@#$%^&*()-+?_=,<>/"
+        numeros="1234567890"
+        maj="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        password_attempt=str(input("Account Password (au moins un car spécial, un numero et une majuscule ) ?: "))
+        if any(car in special_characters for car in password_attempt) and any(num in numeros for num in password_attempt) and any(upper in maj for upper in password_attempt):
+            self.passwd=password_attempt
+        else :
+            print(False)
+            self.password()
+
+    def signup(self,name,pwd:str):
+        self.name=name
+        self.passwd=pwd
+        self.passwd=sha256(self.passwd.encode('utf-8')).hexdigest()
+        self.ip=requests.get('https://api.ipify.org').text
+        result=Query()
+        result.send_query(Query.query_signup,(self.name,self.passwd,self.ip))
+        self.auth = True
+    
+    def login(self, name, pwd):
+        self.name = name
+        self.passwd = pwd
+        result = Query()
+        result.send_query(Query.query_login, (self.name, sha256(self.passwd.encode('utf-8')).hexdigest())) 
+        col = result.cursor.fetchall()
+        if col:  
+            self.auth = True
+            self.id = col[0][0]
+            self.ip = col[0][3]
+        else:
+            print("Mauvais identifiant")
+        
+    def friend_list(self):
+        amis = Query()  
+        val = (self.id,self.id)
+        amis.send_query(Query.query_friend_list, val)  
+        rows = amis.cursor.fetchall() 
+        
+        if not rows:  
+            print("Vous n'avez pas d'amis :")
+        else:
+            print("Voici vos Discussion avec vos amis : ")  
+            for row in rows :
+                if isinstance(row, tuple):                                      
+                    self.chat[row[0]] = int(row[1])
+                    print(f'                {row[0]}')
+        
+        print("Voici vos demandes d'amis en cours :")
+        amis.send_query(Query.query_friend_request, (self.id, self.id ))
+        rows = amis.cursor.fetchall()
+        for row in rows:            
+            if isinstance(row, tuple): 
+                self.demande[row[0]] = int(row[1])
+                print(f'                {row[0]} veut devenir votre ami')
+            
+    def add_friends(self):
+
+           
+        amis = Query()
+        val = str(input("Quelle est le nom de votre amis ? : "))
+        amis.send_query(Query.query_friend_add, (self.id,val ))
+            
+    def accept_friend_requests(self):
+        
+        try:
+            amis= Query()
+            friend = str(input("Qui veut tu accepter ?"))
+            val = self.demande[friend]
+            amis.send_query(Query.query_accept_friend_requests, (val, ))
+            print("Vous avez accepté ", friend ," dans vos amis !")
+        except:
+            print("petit probleme")
+            
+    def join_chat(self, chatID):
+        
+        self.actual_chat = chatID
+        display = Query()
+        
+            
+        try:
+            display.send_query(Query.query_display_chat, (self.actual_chat,))
+            cur_messages = display.cursor.fetchall()
+            mess_content = []
+            for mess in cur_messages:
+                    display.send_query(Query.query_get_friend_name, (mess[3], ))
+                    name = display.cursor.fetchall()
+                    mess_content.append({"sender": name[0] , "message": mess[2], "time":mess[1]}) #ID, time, message, expediteur
+                
+                
+
+                        
+            return mess_content
+
+        except Exception as e:
+            print(e)
+        
+    def send_chat(self, text):
+        try:   
+            
+                
+            temps = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            val = (self.actual_chat,temps, self.id, text)
+            chat = Query()
+            chat.send_query(Query.query_send_message, val)
+        except:
+            print("petit probleme")
+        
+    def chat_id(self):
+        tab=[]
+        amis = Query()
+        val = (self.id, self.id)
+        amis.send_query(Query.query_friend_list, val)
+        rows = amis.cursor.fetchall()
+        for row in rows:
+            tab.append(row[1])
+        return tab
+
+    def spawn_island(self):
+        try:
+            User_Islands = []
+            amis = Query()
+            val = (self.id, self.id)
+            amis.send_query(Query.query_friend_list, val)
+            rows = amis.cursor.fetchall()
+            nbr_mess = Query()
+            print(rows)
+            for row in rows:
+                a = (row[1],)
+                nbr_mess.send_query(Query.query_island_size, a)
+                b = nbr_mess.cursor.fetchall()
+                print(b[0][0])
+                if b[0][0] > 50:
+                    
+                    User_Islands.append((2, a[0]))
+                else:
+                    User_Islands.append((1, a[0]))
+            return User_Islands
+
+        except mysql.connector.Error as e:
+            print(f"Error in spawn_island(): {e}")
+            return []

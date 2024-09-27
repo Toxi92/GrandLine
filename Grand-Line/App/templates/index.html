@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bouge</title>
+</head>
+<style>
+
+</style>
+<body style="background-color:rgb(95, 225, 214);">
+    <div id="canvas-container">
+        <canvas id="canvas" width=" 1920" height="1080"></canvas>
+    </div>
+
+    
+</body>
+<script type="application/json" id="islands-data">{{ islands | tojson }}</script>
+
+<script src="{{ url_for('static', filename='main.js') }}"></script>
+<script src="{{ url_for('static', filename='InputHandler.js') }}"></script>
+<script>
+</script>
+</html>

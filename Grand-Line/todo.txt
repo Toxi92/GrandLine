@@ -1,0 +1,2 @@
+Redirect apres le register a faire, et modifier son implementation ducoup
+Voir comment faire apparaitre les iles en fonction des discussions
